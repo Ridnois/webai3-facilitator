@@ -131,6 +131,8 @@ app.post("/verify", async (c) => {
   if (!parsed.success) {
     return c.json({ isValid: false, invalidReason: "invalid_request" }, 400);
   }
+  const network = (parsed.data.paymentRequirements as Record<string, unknown>).network ?? "?";
+  console.log(`[verify] ← received network=${network}`);
   try {
     const response = await facilitator.verify(
       parsed.data.paymentPayload as never,
