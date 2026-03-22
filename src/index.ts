@@ -52,6 +52,7 @@ const env = loadEnv();
 const account = privateKeyToAccount(env.EVM_PRIVATE_KEY as `0x${string}`);
 
 function makeEvmSigner(chain: typeof mainnet | typeof sepolia, rpcUrl: string) {
+  const tag = chain.name;
   const client = createWalletClient({
     account,
     chain,
@@ -60,12 +61,32 @@ function makeEvmSigner(chain: typeof mainnet | typeof sepolia, rpcUrl: string) {
 
   return toFacilitatorEvmSigner({
     address: account.address,
-    readContract:              (args) => client.readContract(args as never),
-    verifyTypedData:           (args) => client.verifyTypedData(args as never),
-    writeContract:             (args) => client.writeContract(args as never),
-    sendTransaction:           (args) => client.sendTransaction(args as never),
+    readContract: async (args) => {
+      console.log(`[${tag}] readContract ${(args as { functionName?: string }).functionName ?? "?"}`);
+      const r = await client.readContract(args as never);
+      console.log(`[${tag}] readContract ✓`);
+      return r;
+    },
+    verifyTypedData: async (args) => {
+      console.log(`[${tag}] verifyTypedData`);
+      const r = await client.verifyTypedData(args as never);
+      console.log(`[${tag}] verifyTypedData ✓ result=${r}`);
+      return r;
+    },
+    writeContract: async (args) => {
+      console.log(`[${tag}] writeContract ${(args as { functionName?: string }).functionName ?? "?"}`);
+      const r = await client.writeContract(args as never);
+      console.log(`[${tag}] writeContract ✓ tx=${r}`);
+      return r;
+    },
+    sendTransaction: (args) => client.sendTransaction(args as never),
     waitForTransactionReceipt: (args) => client.waitForTransactionReceipt(args),
-    getCode:                   (args) => client.getCode(args),
+    getCode: async (args) => {
+      console.log(`[${tag}] getCode`);
+      const r = await client.getCode(args);
+      console.log(`[${tag}] getCode ✓`);
+      return r;
+    },
   });
 }
 
@@ -112,7 +133,7 @@ app.use(
 );
 
 const bodySchema = z.object({
-  paymentPayload:      z.record(z.unknown()),
+  paymentPayload: z.record(z.unknown()),
   paymentRequirements: z.record(z.unknown()),
 });
 
@@ -131,8 +152,10 @@ app.post("/verify", async (c) => {
   if (!parsed.success) {
     return c.json({ isValid: false, invalidReason: "invalid_request" }, 400);
   }
-  const network = (parsed.data.paymentRequirements as Record<string, unknown>).network ?? "?";
-  console.log(`[verify] ← received network=${network}`);
+  const req = parsed.data.paymentRequirements as Record<string, unknown>;
+  const pay = parsed.data.paymentPayload as Record<string, unknown>;
+  console.log(`[verify] requirements:`, JSON.stringify(req, null, 2));
+  console.log(`[verify] payload:`, JSON.stringify(pay, null, 2));
   try {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("verify timed out after 10s (RPC may be unreachable)")), 10_000)
