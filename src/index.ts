@@ -134,10 +134,18 @@ app.post("/verify", async (c) => {
   const network = (parsed.data.paymentRequirements as Record<string, unknown>).network ?? "?";
   console.log(`[verify] ← received network=${network}`);
   try {
-    const response = await facilitator.verify(
-      parsed.data.paymentPayload as never,
-      parsed.data.paymentRequirements as never,
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("verify timed out after 10s (RPC may be unreachable)")), 10_000)
     );
+    console.log(`[verify] calling SDK verify…`);
+    const response = await Promise.race([
+      facilitator.verify(
+        parsed.data.paymentPayload as never,
+        parsed.data.paymentRequirements as never,
+      ),
+      timeout,
+    ]);
+    console.log(`[verify] SDK returned isValid=${(response as { isValid: boolean }).isValid}`);
     return c.json(response);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
