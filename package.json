@@ -5,9 +5,9 @@
   "description": "x402 facilitator for WEBAI3 — Ethereum mainnet USDC settlement via EIP-3009",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx --env-file=.env.local watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node --env-file=.env.local dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
