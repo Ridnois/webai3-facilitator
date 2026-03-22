@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { createWalletClient, http, publicActions } from "viem";
-import { mainnet } from "viem/chains";
+import { mainnet, sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 
@@ -25,6 +25,10 @@ const envSchema = z.object({
     .string()
     .url("must be a valid URL")
     .default("https://eth.llamarpc.com"),
+  EVM_RPC_URL_SEPOLIA: z
+    .string()
+    .url("must be a valid URL")
+    .default("https://rpc.sepolia.org"),
   PORT: z.coerce.number().int().min(1).max(65535).default(4022),
   ALLOWED_ORIGINS: z.string().default("*"),
 });
@@ -43,36 +47,40 @@ function loadEnv() {
 
 const env = loadEnv();
 
-// ── Viem client (wallet + public actions) ─────────────────────────────────────
+// ── Viem clients ──────────────────────────────────────────────────────────────
 
 const account = privateKeyToAccount(env.EVM_PRIVATE_KEY as `0x${string}`);
 
-const viemClient = createWalletClient({
-  account,
-  chain: mainnet,
-  transport: http(env.EVM_RPC_URL),
-}).extend(publicActions);
+function makeEvmSigner(chain: typeof mainnet | typeof sepolia, rpcUrl: string) {
+  const client = createWalletClient({
+    account,
+    chain,
+    transport: http(rpcUrl),
+  }).extend(publicActions);
+
+  return toFacilitatorEvmSigner({
+    address: account.address,
+    readContract:              (args) => client.readContract(args as never),
+    verifyTypedData:           (args) => client.verifyTypedData(args as never),
+    writeContract:             (args) => client.writeContract(args as never),
+    sendTransaction:           (args) => client.sendTransaction(args as never),
+    waitForTransactionReceipt: (args) => client.waitForTransactionReceipt(args),
+    getCode:                   (args) => client.getCode(args),
+  });
+}
 
 // ── x402 facilitator ──────────────────────────────────────────────────────────
-// toFacilitatorEvmSigner adapts a viem wallet+public client into the
-// FacilitatorEvmSigner interface expected by @x402/evm
-
-const evmSigner = toFacilitatorEvmSigner({
-  address: account.address,
-  readContract:              (args) => viemClient.readContract(args as never),
-  verifyTypedData:           (args) => viemClient.verifyTypedData(args as never),
-  writeContract:             (args) => viemClient.writeContract(args as never),
-  sendTransaction:           (args) => viemClient.sendTransaction(args as never),
-  waitForTransactionReceipt: (args) => viemClient.waitForTransactionReceipt(args),
-  getCode:                   (args) => viemClient.getCode(args),
-});
 
 const facilitator = new x402Facilitator();
 
-// Register Ethereum mainnet with the EVM exact scheme (EIP-3009 USDC)
 registerExactEvmScheme(facilitator, {
-  signer: evmSigner,
+  signer: makeEvmSigner(mainnet, env.EVM_RPC_URL),
   networks: "eip155:1" as Network,
+});
+
+registerExactEvmScheme(facilitator, {
+  signer: makeEvmSigner(sepolia, env.EVM_RPC_URL_SEPOLIA),
+  networks: "eip155:11155111" as Network,
 });
 
 // Logging hooks
@@ -109,7 +117,11 @@ const bodySchema = z.object({
 });
 
 app.get("/health", (c) =>
-  c.json({ status: "ok", signer: account.address, network: "eip155:1" })
+  c.json({
+    status: "ok",
+    signer: account.address,
+    networks: ["eip155:1", "eip155:11155111"],
+  })
 );
 
 app.get("/supported", (c) => c.json(facilitator.getSupported()));
@@ -155,9 +167,10 @@ app.notFound((c) => c.json({ error: "not found" }, 404));
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 console.log(`🚀 webai3-facilitator`);
-console.log(`   Network : Ethereum mainnet (eip155:1)`);
-console.log(`   Signer  : ${account.address}`);
-console.log(`   RPC     : ${env.EVM_RPC_URL}`);
-console.log(`   Port    : ${env.PORT}`);
+console.log(`   Networks : eip155:1 (mainnet), eip155:11155111 (sepolia)`);
+console.log(`   Signer   : ${account.address}`);
+console.log(`   RPC      : ${env.EVM_RPC_URL}`);
+console.log(`   RPC Sep  : ${env.EVM_RPC_URL_SEPOLIA}`);
+console.log(`   Port     : ${env.PORT}`);
 
 serve({ fetch: app.fetch, port: env.PORT });
